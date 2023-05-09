@@ -2,27 +2,22 @@ import {useWeb3React} from "@web3-react/core";
 import Head from "next/head";
 import Link from "next/link";
 import Account from "../components/Account";
-import ETHBalance from "../components/ETHBalance";
-import TokenBalance from "../components/TokenBalance";
 import useEagerConnect from "../hooks/useEagerConnect";
 import Background from "../components/background";
 import Image from "next/image";
-import {Layout, Space, Segmented, Form, Spin, Input, Button, Col, Row, Statistic, Progress} from 'antd';
-import {useEffect, useState} from "react";
-import {Table, Divider, notification, Tag} from 'antd';
+import {Layout, Space, Segmented, notification, Form, Spin, Input, Button, Col, Row, Statistic, Progress} from 'antd';
+import {ReactNode, useEffect, useState} from "react";
+import {Table, Divider, Modal, Result, Tag} from 'antd';
 import type {ColumnsType} from 'antd/es/table';
-import {Web3Provider} from "@ethersproject/providers";
-import useTokenBalance from "../hooks/useTokenBalance";
-import useSWR from "swr";
-import useTokenContract from "../hooks/useTokenContract";
-import useRewardContract from "../hooks/useRewardContract";
 import {abi as rewardAbi} from "../contracts/Reward.json"
 import Web3 from "web3";
 import {isHex} from "web3-utils";
 
 const {Header, Footer, Sider, Content} = Layout;
+import web3Config from "../contracts/config"
+import {useRouter} from "next/router";
 
-const REWARD_ADDRESS = "0x98269F37AF328daf24d70AE253369d94736CFF65";
+const REWARD_ADDRESS = web3Config.rewardAddress;
 const {Countdown} = Statistic;
 
 interface DataType {
@@ -70,7 +65,8 @@ const columns: ColumnsType<DataType> = [
 
 
 function Home() {
-    const {account, library} = useWeb3React();
+    const {account, library, chainId} = useWeb3React();
+    const [loadingTxData, setLoadingTxData] = useState<{ open: boolean, result?: ReactNode }>({open: false})
 
     const triedToEagerConnect = useEagerConnect();
     const [state, setState] = useState("request")
@@ -86,9 +82,43 @@ function Home() {
         vestingEnd: 0,
         userReward: {}
     })
+
+    const router = useRouter()
     useEffect(() => {
         const handle = async () => {
-            if (library) {
+            if (chainId !== web3Config.chainID && library) {
+                try {
+                    // @ts-ignore
+                    await library.provider.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{chainId: "0x" + web3Config.chainID.toString(16)}],
+                    })
+                } catch (e) {
+                    // @ts-ignore
+                    if (e.code == 4902) {
+                        // @ts-ignore
+                        await context.library.provider.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [
+                                {
+                                    chainId: "0x" + web3Config.chainID.toString(16),
+                                    chainName: web3Config.bscChainName,
+                                    rpcUrls: web3Config.bscRpcUrls,
+                                    nativeCurrency: web3Config.bscNativeCurrency,
+                                    blockExplorerUrls: web3Config.bscBlockExplorerUrls,
+                                },
+                            ],
+                        })
+                    }
+                }
+            }
+        }
+        handle()
+
+    }, [chainId])
+    useEffect(() => {
+        const handle = async () => {
+            if (library && chainId === web3Config.chainID) {
                 const web3 = new Web3(library.provider);
                 // @ts-ignore
                 const contract = new web3.eth.Contract(rewardAbi, REWARD_ADDRESS);
@@ -102,7 +132,6 @@ function Home() {
                     percent = 0
                 }
 
-                console.log(percent)
                 setRewardData({
                     percent: percent > 1 ? 100 : percent * 100,
                     claimable,
@@ -115,12 +144,12 @@ function Home() {
         }
         handle()
 
-    }, [library, account])
+    }, [library, account, chainId])
 
     useEffect(() => {
         const handle = async () => {
-            if (account && library) {
-                let res = await fetch("https://api-testnet.bscscan.com/api?module=logs&action=getLogs" +
+            if (account && library && web3Config.chainID === chainId) {
+                let res = await fetch(web3Config.bscScanApi + "/api?module=logs&action=getLogs" +
                     "&address=" + REWARD_ADDRESS +
                     "&topic0=0x2213b00378693df3858f19dce6917fe8950ef26e9151de5f10cd4e07f4773475" +
                     "&topic0_1_opr=and" +
@@ -165,7 +194,7 @@ function Home() {
         }
 
         handle()
-    }, [account, library])
+    }, [account, library, chainId])
 
 
     const isConnected = typeof account === "string" && !!library;
@@ -180,6 +209,19 @@ function Home() {
                 <link rel="icon" href="/favicon.ico"/>
             </Head>
             <Layout>
+                <Modal
+                    open={loadingTxData.open}
+                    footer={null}
+                    centered={true}
+                    onCancel={() => {
+                        setLoadingTxData({...loadingTxData, open: false})
+                        setLoadingRequest(false)
+                        setLoadingClaim(false)
+                    }
+                    }
+                >
+                    {loadingTxData.result}
+                </Modal>
                 <Header className="flex z-20 " style={{backgroundColor: '#ececec', height: 64,}}>
                     <div className="flex items-center">
                         <Link href="/">
@@ -224,7 +266,7 @@ function Home() {
                         />
                     </div>
 
-                    <div className={"rounded-lg shadow shadow-gray-600 w-3/4 mx-auto pt-5 mt-5 min-h-[500px]"}>
+                    <div className={"rounded-lg shadow shadow-gray-600 w-3/4 mx-auto pt-5 my-5 min-h-[500px]"}>
                         {
                             state === "request" ?
                                 <div className={"text-center block"}>
@@ -243,7 +285,9 @@ function Home() {
                                             </Spin>
                                         </div>
 
-                                        <Button style={{display: loadingRequest ? "none" : ""}} size={"large"}
+                                        <button
+                                            className={"w-32 mx-auto border-blue-500 bg-blue-500 text-white hover:bg-white hover:text-blue-500 mb-2  h-10  items-center justify-center rounded-md border text-sm transition-all focus:outline-none"}
+                                            style={{display: loadingRequest ? "none" : ""}}
                                                 onClick={() => {
                                                     setLoadingRequest(true)
                                                     if (isHex(txHash) && txHash.length == 66) {
@@ -252,25 +296,38 @@ function Home() {
                                                         const contract = new web3.eth.Contract(rewardAbi, REWARD_ADDRESS);
                                                         contract.methods.requestDiscount([txHash]).send({from: account})
                                                             .on('transactionHash', function (hash) {
-                                                                console.log(hash)
-                                                                notification.info({
-                                                                    message: "Transaction Hash",
-                                                                    description: <Link
-                                                                        href={"https://testnet.bscscan.com/tx/" + hash}
-                                                                        target={"_blank"}>{hash}</Link>
+
+                                                                setLoadingTxData({
+                                                                    open: true,
+                                                                    result: <Result icon={<Spin/>}
+                                                                                    title="Transaction is submitting"
+                                                                                    extra={<button className={"mx-auto border-blue-500 bg-blue-500 text-white hover:bg-white hover:text-blue-500 mb-2  h-10 w-40 items-center justify-center rounded-md border text-sm transition-all focus:outline-none"}><Link
+                                                                                        href={web3Config.bscBlockExplorerUrls[0] + `/tx/` + hash}
+                                                                                        target={"_blank"}>Transaction
+                                                                                        link</Link></button>}/>
                                                                 })
                                                             })
-                                                            .on('confirmation', function (cfNumber) {
-                                                                if (cfNumber === 1) {
-                                                                    setLoadingRequest(false)
-                                                                    // console.log(res)
-                                                                    notification.success({
-                                                                        message: "Transaction success",
-                                                                    })
-                                                                }
+                                                            .on('receipt', function (receipt) {
+
+                                                                setLoadingTxData({
+                                                                    open: true,
+                                                                    result: <Result status="success"
+                                                                                    title={"Transaction Successfully "}
+                                                                                    extra={<button className={"mx-auto border-blue-500 bg-blue-500 text-white hover:bg-white hover:text-blue-500 mb-2  h-10 w-40 items-center justify-center rounded-md border text-sm transition-all focus:outline-none"}><Link
+                                                                                        href={web3Config.bscBlockExplorerUrls[0] + `/tx/` + receipt.transactionHash}
+                                                                                        target={"_blank"}>Transaction
+                                                                                        link</Link></button>}/>
+                                                                })
+
 
                                                             })
                                                             .on('error', function (error, receipt) {
+                                                                setLoadingTxData({
+                                                                    open: true,
+                                                                    result: <Result status="error" title={"Error"}
+                                                                                    subTitle={error.message}/>
+                                                                })
+                                                                // router.reload();
                                                                 setLoadingRequest(false)
                                                             });
 
@@ -285,7 +342,7 @@ function Home() {
                                                 }
                                                 }>
 
-                                            Submit</Button>
+                                            Submit</button>
                                     </div>
                                     <Divider>Submitted history</Divider>
                                     <Table
@@ -302,12 +359,12 @@ function Home() {
                                         <Row gutter={16} className={"p-5"}>
                                             <Col span={12}>
                                                 <Statistic className={"text-center"} title="All Claimed Token"
-                                                           value={Math.floor(rewardData.totalReward / 10 ** 4) / 10 ** 14}/>
+                                                           value={(Math.floor(rewardData.totalReward / 10 ** 4) / 10 ** 14).toFixed(3)}/>
                                             </Col>
                                             <Col span={12}>
                                                 {/*suffix={<Image className={"absolute top-6"} width={40}  height={40} alt={"coin"} src="/coin.png"/>}*/}
                                                 <Statistic className={"text-center"} title="Claimable Token"
-                                                           value={Math.floor(rewardData.claimable / 10 ** 4) / 10 ** 14}/>
+                                                           value={(Math.floor(rewardData.claimable / 10 ** 4) / 10 ** 14).toFixed(3)}/>
                                             </Col>
 
 
@@ -316,7 +373,7 @@ function Home() {
                                             <Col span={12}>
                                                 {/*suffix={<Image className={"absolute top-6"} width={40}  height={40} alt={"coin"} src="/coin.png"/>}*/}
                                                 <Statistic className={"text-center"} title="Not claim token"
-                                                           value={Math.floor(rewardData.notClaim / 10 ** 4) / 10 ** 14}/>
+                                                           value={(Math.floor(rewardData.notClaim / 10 ** 4) / 10 ** 14).toFixed(3)}/>
                                             </Col>
                                             <Col span={12}>
                                                 <Statistic className={"text-center"} title="Full claim at"
@@ -331,7 +388,7 @@ function Home() {
                                                     <p>Claim Progress</p>
                                                     <Progress className={"pt-2 w-4/5"}
                                                               type={"circle"}
-                                                              percent={rewardData.percent}
+                                                              percent={parseFloat(rewardData.percent.toFixed(3))}
                                                               strokeColor={{'0%': '#108ee9', '100%': '#87d068'}}/>
                                                 </div>
                                             </Col>
@@ -343,9 +400,10 @@ function Home() {
                                                 <div className="content"/>
                                             </Spin>
                                         </div>
-                                        <Button
+                                        <button
+                                            className={"mx-auto mb-2  border-blue-500 bg-blue-500 text-white hover:bg-white hover:text-blue-500 mb-2 flex h-10 w-20 items-center justify-center rounded-md border text-sm transition-all focus:outline-none"}
                                             style={{display: !loadingClaim ? "" : "none"}}
-                                            size={"large"} disabled={rewardData.claimable == 0}
+                                            // size={"large"} disabled={rewardData.claimable == 0}
                                             onClick={() => {
                                                 setLoadingClaim(true)
 
@@ -354,38 +412,41 @@ function Home() {
                                                 const contract = new web3.eth.Contract(rewardAbi, REWARD_ADDRESS);
                                                 contract.methods.claim().send({from: account})
                                                     .on('transactionHash', function (hash) {
-                                                        console.log(hash)
-                                                        notification.info({
-                                                            message: "Transaction Hash",
-                                                            description: <Link
-                                                                href={"https://testnet.bscscan.com/tx/" + hash}
-                                                                target={"_blank"}>{hash}</Link>
+                                                        setLoadingTxData({
+                                                            open: true,
+                                                            result: <Result icon={<Spin/>}
+                                                                            title="Transaction is submitting"
+                                                                            extra={<button className={"mx-auto border-blue-500 bg-blue-500 text-white hover:bg-white hover:text-blue-500 mb-2  h-10 w-40 items-center justify-center rounded-md border text-sm transition-all focus:outline-none"}><Link
+                                                                                href={web3Config.bscBlockExplorerUrls[0] + `/tx/` + hash}
+                                                                                target={"_blank"}>Transaction
+                                                                                link</Link></button>}/>
                                                         })
                                                     })
-                                                    .on('confirmation', function (cfNumber) {
-                                                        if (cfNumber === 1) {
-                                                            setLoadingClaim(false)
-                                                            // console.log(res)
-                                                            notification.success({
-                                                                message: "Transaction success",
-                                                            })
-                                                        }
+                                                    .on('receipt', function (receipt) {
+
+                                                        setLoadingTxData({
+                                                            open: true,
+                                                            result: <Result status="success"
+                                                                            title={"Transaction Successfully "}
+                                                                            extra={<button className={"mx-auto border-blue-500 bg-blue-500 text-white hover:bg-white hover:text-blue-500 mb-2  h-10 w-40 items-center justify-center rounded-md border text-sm transition-all focus:outline-none"}><Link
+                                                                                href={web3Config.bscBlockExplorerUrls[0] + `/tx/` + receipt.transactionHash}
+                                                                                target={"_blank"}>Transaction
+                                                                                link</Link></button>}/>
+                                                        })
+
 
                                                     })
                                                     .on('error', function (error, receipt) {
-                                                        setLoadingClaim(false)
+                                                        setLoadingTxData({
+                                                            open: true,
+                                                            result: <Result status="error" title={"Error"}
+                                                                            subTitle={error.message}/>
+                                                        })
                                                     });
                                             }}
-                                        >Claim</Button>
+                                        >Claim</button>
 
                                     </div>
-
-                                    {/*<p>Total claimed token: {rewardData.totalReward}</p>*/}
-                                    {/*<p>Claimable: {rewardData.claimable}</p>*/}
-                                    {/*<p>{rewardData.userReward.lastBlock}</p>*/}
-                                    {/*<p>Not claim: {rewardData.notClaim}</p>*/}
-                                    {/*<p>Full claim*/}
-                                    {/*    in {rewardData.vestingEnd.toString()}</p>*/}
 
                                 </div>
                         }
@@ -394,41 +455,7 @@ function Home() {
 
                 </Content>
                 <Background/>
-                {/*<Footer style={footerStyle}>Footer</Footer>*/}
             </Layout>
-
-            {/*<main style={{display: "flex"}}>*/}
-            {/*    /!*<div>*!/*/}
-
-            {/*        /!*<h1 style={{zIndex:20,position:'relative'}}>*!/*/}
-            {/*        /!*    Welcome to{" "}*!/*/}
-            {/*        /!*    <a href="https://github.com/mirshko/next-web3-boilerplate">*!/*/}
-            {/*        /!*        next-web3-boilerplate*!/*/}
-            {/*        /!*    </a>*!/*/}
-            {/*        /!*</h1>*!/*/}
-
-            {/*        /!*{isConnected && (*!/*/}
-            {/*        /!*    <section>*!/*/}
-            {/*        /!*        <ETHBalance/>*!/*/}
-
-            {/*        /!*        <TokenBalance tokenAddress={DAI_TOKEN_ADDRESS} symbol="DAI"/>*!/*/}
-            {/*        /!*    </section>*!/*/}
-            {/*        /!*)}*!/*/}
-            {/*    /!*</div>*!/*/}
-
-
-            {/*</main>*/}
-
-            {/*<style jsx>{`*/}
-            {/*  nav {*/}
-            {/*    display: flex;*/}
-            {/*    justify-content: space-between;*/}
-            {/*  }*/}
-
-            {/*  main {*/}
-            {/*    text-align: center;*/}
-            {/*  }*/}
-            {/*`}</style>*/}
 
         </div>
 
