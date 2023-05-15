@@ -8,7 +8,7 @@ const Bubbles = () => {
             {Array.from({ length: 10 }, (_, idx) => idx).map((idx) => {
                 const animationDelay = Math.random() * 10;
                 const animationDuration = 6 / (Math.random()+1);
-                const left = (idx+ Math.random())/10*100;
+                const left = (idx+ Math.random())/10*100*2;
                 return (
                     <Image
                         key={idx}
