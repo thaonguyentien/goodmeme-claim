@@ -1,7 +1,7 @@
 const config = {
     chainID: 97,
     bscChainName: 'Smart Chain',
-    bscRpcUrls: ["https://bsc-dataseed.binance.org/"],
+    bscRpcUrls: ["https://data-seed-prebsc-1-s1.binance.org:8545"],
     bscNativeCurrency: {name: "BNB", decimals: 18, symbol: "BNB"},
     bscBlockExplorerUrls: ["https://testnet.bscscan.com"],
     rewardAddress: "0x98269F37AF328daf24d70AE253369d94736CFF65",
