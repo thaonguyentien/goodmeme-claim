@@ -84,6 +84,39 @@ function Airdrop() {
 
 
     useEffect(() => {
+        const handle = async () => {
+            if (chainId !== web3Config.chainID && library) {
+                try {
+                    // @ts-ignore
+                    await library.provider.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{chainId: "0x" + web3Config.chainID.toString(16)}],
+                    })
+                } catch (e) {
+                    // @ts-ignore
+                    if (e.code == 4902) {
+                        // @ts-ignore
+                        await library.provider.request({
+                            method: 'wallet_addEthereumChain',
+                            params: [
+                                {
+                                    chainId: "0x" + web3Config.chainID.toString(16),
+                                    chainName: web3Config.bscChainName,
+                                    rpcUrls: web3Config.bscRpcUrls,
+                                    nativeCurrency: web3Config.bscNativeCurrency,
+                                    blockExplorerUrls: web3Config.bscBlockExplorerUrls,
+                                },
+                            ],
+                        })
+                    }
+                }
+            }
+        }
+        handle()
+
+    }, [chainId])
+
+    useEffect(() => {
         const handler = async () => {
             if (account) {
                 const res = await fetch("/api/claim?address=" + account)
